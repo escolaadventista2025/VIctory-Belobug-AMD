@@ -53,3 +53,14 @@ Other relevant documentation: docs/architecture.md, docs/view-heap-limit.md, doc
 ## Next decision
 
 Prioritize instrumentation correctness and independent measurements before changing allocation lifetime, descriptor mapping or shader translation. No guarantee of lower VRAM support or frame-rate improvement is made. The main branch is not changed by this report.
+
+
+## Follow-up changes: initial low-memory diagnostics
+
+The branch now counts both idle CPU snapshot caches rather than only the general cache. The counter is retained payload capacity, not total process commit or active allocations. The DXGI report includes the non-local segment budget as well as its usage.
+
+The mesh feature query now reports the success of the mesh-tier and shader-model queries independently, together with their returned values. The existing capability predicate remains unchanged. A missing feature is not emulated or bypassed.
+
+An opt-in environment variable, `VICTORY_SNAPSHOT_POOL_MB`, caps retained idle snapshot capacity **per cache** (general and tile). Default: 512 MiB per cache; values above 512 are clamped, invalid values retain the default, and zero disables idle retention. A synthetic low-memory test with a value of 128 permits at most 256 MiB across these two idle pools, not counting active snapshots or allocation overhead. Smaller caches may increase CPU allocation costs. No changes were made to in-flight resource lifetime, proprietary content, GPU capability requirements or executable access checks.
+
+Validation status: a unit test for counting reserved capacity was added. The Windows build, unit tests, GPU feature queries and memory/performance measurements have not been run in this environment. Use synthetic workloads to validate before merging. The RX 5600-class target remains unsupported for native mesh shaders; no shader fallback implementation or 6 GiB VRAM guarantee is claimed.
