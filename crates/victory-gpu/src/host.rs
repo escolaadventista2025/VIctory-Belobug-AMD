@@ -987,27 +987,37 @@ impl Host {
                 HighestShaderModel: D3D_SHADER_MODEL_6_6,
             };
             // SAFETY: each query writes its own structure of the given size.
-            let ok = unsafe {
-                self.device
-                    .CheckFeatureSupport(
+            let (options_result, model_result) = unsafe {
+                (
+                    self.device.CheckFeatureSupport(
                         D3D12_FEATURE_D3D12_OPTIONS7,
                         (&raw mut options).cast(),
                         size_of_val(&options) as u32,
-                    )
-                    .is_ok()
-                    && self
-                        .device
-                        .CheckFeatureSupport(
-                            D3D12_FEATURE_SHADER_MODEL,
-                            (&raw mut model).cast(),
-                            size_of_val(&model) as u32,
-                        )
-                        .is_ok()
+                    ),
+                    self.device.CheckFeatureSupport(
+                        D3D12_FEATURE_SHADER_MODEL,
+                        (&raw mut model).cast(),
+                        size_of_val(&model) as u32,
+                    ),
+                )
             };
-            let mesh = ok
+            let mesh = options_result.is_ok()
+                && model_result.is_ok()
                 && options.MeshShaderTier != D3D12_MESH_SHADER_TIER_NOT_SUPPORTED
                 && model.HighestShaderModel.0 >= D3D_SHADER_MODEL_6_6.0;
-            tracing::info!(mesh, "host mesh shader support");
+            tracing::info!(
+                mesh,
+                mesh_query_ok = options_result.is_ok(),
+                shader_model_query_ok = model_result.is_ok(),
+                mesh_tier = ?options_result.as_ref().ok().map(|_| options.MeshShaderTier.0),
+                shader_model = ?model_result.as_ref().ok().map(|_| model.HighestShaderModel.0),
+                "host mesh shader support"
+            );
+            if !mesh {
+                tracing::warn!(
+                    "mesh shader requirements not met; reducing memory usage does not add missing GPU features"
+                );
+            }
             mesh
         })
     }
