@@ -174,10 +174,22 @@ pub(crate) fn sparse_writes_text() -> String {
     format!("declared {declared:.1} MB, snapshots {taken:.1} MB, compared {compared:.1} MB, differed {differed:.1} MB")
 }
 
-/// Bytes of the snapshot memory kept for reuse.
+/// Reserved payload bytes, including unused capacity in cleared buffers.
+fn retained_bytes(buffers: &[Vec<u8>]) -> u64 {
+    buffers.iter().map(|buffer| buffer.capacity() as u64).sum()
+}
+
+/// Bytes of both snapshot caches kept for reuse (not in-flight snapshots).
 pub(crate) fn pool_bytes() -> u64 {
-    let pool = POOL.lock().unwrap_or_else(|e| e.into_inner());
-    pool.iter().map(|v| v.capacity() as u64).sum()
+    let general = {
+        let pool = POOL.lock().unwrap_or_else(|e| e.into_inner());
+        retained_bytes(&pool)
+    };
+    let tiles = {
+        let pool = TILE_POOL.lock().unwrap_or_else(|e| e.into_inner());
+        retained_bytes(&pool)
+    };
+    general.saturating_add(tiles)
 }
 
 /// Bytes the pool keeps at most: snapshots of the world's 174 MB heap
@@ -2466,6 +2478,17 @@ pub(crate) fn near(va: u64) -> String {
 mod tests {
     use super::*;
     use std::ops::Range;
+
+    #[test]
+    fn retained_snapshot_bytes_count_capacity_not_length() {
+        assert_eq!(retained_bytes(&[]), 0);
+        let mut buffer = Vec::with_capacity(PAGE);
+        buffer.push(1);
+        buffer.clear();
+        let expected = buffer.capacity() as u64;
+        assert!(expected >= PAGE as u64);
+        assert_eq!(retained_bytes(&[buffer]), expected);
+    }
 
     #[test]
     fn partial_match_leaves_unchecked_bytes_visible() {
