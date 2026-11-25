@@ -153,8 +153,15 @@ fn pooled_tiles(n: usize) -> Vec<Vec<u8>> {
 /// Returns tile snapshots to their pool.
 fn give_back_tiles(all: impl Iterator<Item = Vec<u8>>) {
     let mut pool = TILE_POOL.lock().unwrap_or_else(|e| e.into_inner());
+    let limit = snapshot_pool_limit() as u64;
+    let mut retained = retained_bytes(&pool);
     for v in all {
-        if pool.len() < TILE_POOL_MOST && v.capacity() >= PAGE {
+        let capacity = v.capacity() as u64;
+        if pool.len() < TILE_POOL_MOST
+            && v.capacity() >= PAGE
+            && retained.saturating_add(capacity) <= limit
+        {
+            retained += capacity;
             pool.push(v);
         }
     }
@@ -196,17 +203,35 @@ pub(crate) fn pool_bytes() -> u64 {
 /// would otherwise keep 8 of that size (1.4 GB of host memory) for good.
 const POOL_BYTES: usize = 512 << 20;
 
-/// Returns a snapshot buffer to the pool (at most 8 kept, the largest,
-/// and no more than [`POOL_BYTES`] in all).
+/// Per-cache retention limit; applies only to idle CPU snapshot buffers.
+/// Invalid or overflowing values fall back to the original default.
+fn snapshot_pool_limit() -> usize {
+    static LIMIT: std::sync::OnceLock<usize> = std::sync::OnceLock::new();
+    *LIMIT.get_or_init(|| {
+        std::env::var("VICTORY_SNAPSHOT_POOL_MB")
+            .ok()
+            .and_then(|value| value.trim().parse::<usize>().ok())
+            .and_then(|mib| mib.checked_mul(1 << 20))
+            .map(|bytes| bytes.min(POOL_BYTES))
+            .unwrap_or(POOL_BYTES)
+    })
+}
+
+/// Returns a snapshot buffer to the pool (at most 8 kept, within the
+/// configured per-cache retention limit).
 fn give_back(v: Vec<u8>) {
     let mut pool = POOL.lock().unwrap_or_else(|e| e.into_inner());
     pool.push(v);
     pool.sort_by_key(|v| std::cmp::Reverse(v.capacity()));
     pool.truncate(8);
-    let mut total = 0;
+    let limit = snapshot_pool_limit();
+    let mut total = 0usize;
     pool.retain(|v| {
+        if v.capacity() > limit.saturating_sub(total) {
+            return false;
+        }
         total += v.capacity();
-        total <= POOL_BYTES
+        true
     });
 }
 
