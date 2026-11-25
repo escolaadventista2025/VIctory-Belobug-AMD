@@ -135,10 +135,11 @@ pub fn report() -> String {
         if let Some([local, system]) = crate::host::video_memory() {
             let _ = write!(
                 line,
-                ", driver: video {} of {} MiB, system {} MiB",
+                ", driver: video {} of {} MiB, system {} of {} MiB",
                 mib(local.0),
                 mib(local.1),
-                mib(system.0)
+                mib(system.0),
+                mib(system.1)
             );
         }
     }
